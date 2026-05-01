@@ -1,0 +1,1413 @@
+<!DOCTYPE html>
+<html lang="en">    
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G-INTELLIGENCE | Advanced Gesture Recognition</title>
+
+    <!-- MediaPipe CDNs -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&family=Space+Mono&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #000080;
+            --secondary: #bc00ff;
+            --accent: #ff0055;
+            --bg: transparent;
+            --panel-bg: rgba(10, 15, 25, 0.8);
+            --text: #ffffff;
+            --text-dim: rgba(255, 255, 255, 0.289);
+            --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+            --font-mono: 'Space Mono', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: var(--font-main);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #app-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: transparent;
+        }
+
+        video {
+            display: none;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            /* Mirror for natural feel */
+        }
+
+        /* HUD Styling */
+        .hud-layer {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 10;
+            padding: 30px;
+            display: grid;
+            grid-template-columns: 300px 1fr 300px;
+            grid-template-rows: 100px 1fr 100px;
+            gap: 20px;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+        }
+
+        .panel-top-left {
+            grid-column: 1;
+            grid-row: 1;
+        }
+
+        .panel-top-right {
+            grid-column: 3;
+            grid-row: 1;
+            text-align: right;
+        }
+
+        .panel-bottom-left {
+            grid-column: 1;
+            grid-row: 3;
+        }
+
+        .panel-bottom-right {
+            grid-column: 3;
+            grid-row: 3;
+            text-align: right;
+        }
+
+        .title {
+            font-size: 1.2rem;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: var(--primary);
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            letter-spacing: 1px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+
+        .stat-value {
+            color: var(--primary);
+            font-weight: bold;
+        }
+
+        /* Central Indicator */
+        .center-hud {
+            grid-column: 2;
+            grid-row: 2;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .reticle {
+            width: 300px;
+            height: 300px;
+            border: 1px solid rgba(0, 242, 255, 0.2);
+            border-radius: 50%;
+            position: relative;
+            animation: rotate 20s linear infinite;
+        }
+
+        .reticle::after {
+            content: '';
+            position: absolute;
+            inset: -10px;
+            border: 2px solid transparent;
+            border-top-color: var(--primary);
+            border-bottom-color: var(--primary);
+            border-radius: 50%;
+            opacity: 0.5;
+        }
+
+        @keyframes rotate {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Gesture Toast */
+        .gesture-indicator {
+            position: absolute;
+            bottom: 120px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px 30px;
+            border-radius: 30px;
+            border: 1px solid var(--primary);
+            box-shadow: 0 0 20px rgba(0, 242, 255, 0.3);
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #fff;
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .gesture-indicator.active {
+            opacity: 1;
+            bottom: 140px;
+        }
+
+        /* Loader */
+        .loader-overlay {
+            position: fixed;
+            inset: 0;
+            background: var(--bg);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.8s ease;
+        }
+
+        .loader-circle {
+            width: 60px;
+            height: 60px;
+            border: 3px solid rgba(0, 242, 255, 0.1);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loader-text {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            letter-spacing: 5px;
+            color: var(--primary);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Loading Screen -->
+    <div class="loader-overlay" id="loader">
+        <div class="loader-circle"></div>
+        <div class="loader-text">INITIALIZING SYSTEM</div>
+    </div>
+
+    <div id="app-container">
+        <video id="input_video"></video>
+        <canvas id="output_canvas"></canvas>
+
+        <!-- HUD Layer -->
+        <div class="hud-layer">
+            <!-- Top Left: System Stats -->
+            <div class="panel panel-top-left">
+                <div class="title">G-INTELLIGENCE v2.0</div>
+                <div class="subtitle">SKELETON TRACKING ACTIVE</div>
+                <div class="stat-row">
+                    <span>LATENCY:</span>
+                    <span class="stat-value" id="val-fps">0ms</span>
+                </div>
+                <div class="stat-row">
+                    <span>HANDS:</span>
+                    <span class="stat-value" id="val-hands">0</span>
+                </div>
+            </div>
+
+            <!-- Top Right: Status -->
+            <div class="panel panel-top-right">
+                <div class="title">STATUS</div>
+                <div class="subtitle" style="color: var(--primary)">SYSTEM NOMINAL</div>
+                <div class="stat-row">
+                    <span class="stat-value" style="color: #fff">ENCRYPTED LINK...</span>
+                </div>
+            </div>
+
+
+
+            <!-- Bottom Left: History/Log -->
+            <div class="panel panel-bottom-left">
+                <div class="title">ENGINE LOG</div>
+                <div class="stat-row">
+                    <span id="val-gesture">SCANNING...</span>
+                </div>
+            </div>
+
+            <!-- Bottom Right: Instructions -->
+            <div class="panel panel-bottom-right">
+                <div class="title">CONTROLS</div>
+                <div class="subtitle">GESTURE RECOGNITION ENABLED</div>
+                <div style="font-size: 0.6rem; color: var(--text-dim); margin-top: 10px;">
+                    TRY: VICTORY, FIST, POINT, THWIP
+                </div>
+            </div>
+        </div>
+
+        <!-- Gesture Toast -->
+        <div class="gesture-indicator" id="gesture-toast">OPEN PALM</div>
+    </div>
+
+    <script>
+        /**
+         * SFXEngine — Procedural sound effects using Web Audio API.
+         * Generates alien-tech hover, electrified crackle, and electroblast sounds.
+         */
+        class SFXEngine {
+            constructor() {
+                this.ctx = null;
+                this.initialized = false;
+                this.masterGain = null;
+                // Track active sound states to avoid re-triggering
+                this._hoverActive = false;
+                this._purpleActive = false;
+                this._hoverNodes = null;
+                this._purpleNodes = null;
+            }
+
+            init() {
+                if (this.initialized) return;
+                try {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    this.masterGain = this.ctx.createGain();
+                    this.masterGain.gain.value = 0.15; // Low master volume
+                    this.masterGain.connect(this.ctx.destination);
+                    this.initialized = true;
+                } catch (e) {
+                    console.warn('Web Audio API not available', e);
+                }
+            }
+
+            // Ensure audio context is resumed (browser autoplay policy)
+            _ensureResumed() {
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            /**
+             * Alien tech wave hover — low-frequency modulated drone
+             * Plays continuously while red/blue orbs are visible.
+             */
+            startHover() {
+                if (!this.initialized) this.init();
+                if (!this.initialized || this._hoverActive) return;
+                this._ensureResumed();
+                this._hoverActive = true;
+
+                const ctx = this.ctx;
+                const gain = ctx.createGain();
+                gain.gain.value = 0.0;
+                gain.connect(this.masterGain);
+
+                // Base drone oscillator (low sine)
+                const osc1 = ctx.createOscillator();
+                osc1.type = 'sine';
+                osc1.frequency.value = 72;
+
+                // Secondary harmonic (triangle, slight detune for alien feel)
+                const osc2 = ctx.createOscillator();
+                osc2.type = 'triangle';
+                osc2.frequency.value = 108;
+                osc2.detune.value = 15;
+
+                // LFO for wavering/hovering effect
+                const lfo = ctx.createOscillator();
+                lfo.type = 'sine';
+                lfo.frequency.value = 3.5;
+                const lfoGain = ctx.createGain();
+                lfoGain.gain.value = 12;
+                lfo.connect(lfoGain);
+                lfoGain.connect(osc1.frequency);
+                lfoGain.connect(osc2.frequency);
+
+                // High shimmer for alien tech texture
+                const shimmer = ctx.createOscillator();
+                shimmer.type = 'sawtooth';
+                shimmer.frequency.value = 2400;
+                const shimmerGain = ctx.createGain();
+                shimmerGain.gain.value = 0.012;
+                shimmer.connect(shimmerGain);
+                shimmerGain.connect(gain);
+
+                const osc1Gain = ctx.createGain();
+                osc1Gain.gain.value = 0.5;
+                const osc2Gain = ctx.createGain();
+                osc2Gain.gain.value = 0.3;
+
+                osc1.connect(osc1Gain);
+                osc2.connect(osc2Gain);
+                osc1Gain.connect(gain);
+                osc2Gain.connect(gain);
+
+                // Fade in
+                gain.gain.setTargetAtTime(0.6, ctx.currentTime, 0.3);
+
+                osc1.start();
+                osc2.start();
+                lfo.start();
+                shimmer.start();
+
+                this._hoverNodes = { gain, osc1, osc2, lfo, shimmer, lfoGain, osc1Gain, osc2Gain, shimmerGain };
+            }
+
+            stopHover() {
+                if (!this._hoverActive || !this._hoverNodes) return;
+                const n = this._hoverNodes;
+                const ctx = this.ctx;
+                n.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
+                setTimeout(() => {
+                    try {
+                        n.osc1.stop(); n.osc2.stop(); n.lfo.stop(); n.shimmer.stop();
+                    } catch (e) {}
+                }, 400);
+                this._hoverActive = false;
+                this._hoverNodes = null;
+            }
+
+            /**
+             * Purple hover — electrified crackle + wave drone.
+             * Layered over a deeper drone with noise-based crackling.
+             */
+            startPurple() {
+                if (!this.initialized) this.init();
+                if (!this.initialized || this._purpleActive) return;
+                this._ensureResumed();
+                this._purpleActive = true;
+
+                const ctx = this.ctx;
+                const gain = ctx.createGain();
+                gain.gain.value = 0.0;
+                gain.connect(this.masterGain);
+
+                // Deep purple drone
+                const drone = ctx.createOscillator();
+                drone.type = 'sine';
+                drone.frequency.value = 55;
+                const droneGain = ctx.createGain();
+                droneGain.gain.value = 0.35;
+                drone.connect(droneGain);
+                droneGain.connect(gain);
+
+                // Wave hover component (triangle, LFO modulated)
+                const wave = ctx.createOscillator();
+                wave.type = 'triangle';
+                wave.frequency.value = 90;
+                const waveLfo = ctx.createOscillator();
+                waveLfo.type = 'sine';
+                waveLfo.frequency.value = 5;
+                const waveLfoGain = ctx.createGain();
+                waveLfoGain.gain.value = 20;
+                waveLfo.connect(waveLfoGain);
+                waveLfoGain.connect(wave.frequency);
+                const waveGain = ctx.createGain();
+                waveGain.gain.value = 0.25;
+                wave.connect(waveGain);
+                waveGain.connect(gain);
+
+                // Electric crackle — noise buffer with bandpass
+                const bufferSize = ctx.sampleRate * 2;
+                const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+                const data = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = (Math.random() * 2 - 1) * (Math.random() > 0.92 ? 1 : 0.05);
+                }
+                const noise = ctx.createBufferSource();
+                noise.buffer = noiseBuffer;
+                noise.loop = true;
+                const bandpass = ctx.createBiquadFilter();
+                bandpass.type = 'bandpass';
+                bandpass.frequency.value = 3000;
+                bandpass.Q.value = 3;
+                const noiseGain = ctx.createGain();
+                noiseGain.gain.value = 0.25;
+                noise.connect(bandpass);
+                bandpass.connect(noiseGain);
+                noiseGain.connect(gain);
+
+                // Electric sizzle oscillator
+                const sizzle = ctx.createOscillator();
+                sizzle.type = 'square';
+                sizzle.frequency.value = 180;
+                const sizzleLfo = ctx.createOscillator();
+                sizzleLfo.type = 'sawtooth';
+                sizzleLfo.frequency.value = 30;
+                const sizzleLfoGain = ctx.createGain();
+                sizzleLfoGain.gain.value = 80;
+                sizzleLfo.connect(sizzleLfoGain);
+                sizzleLfoGain.connect(sizzle.frequency);
+                const sizzleGain = ctx.createGain();
+                sizzleGain.gain.value = 0.04;
+                sizzle.connect(sizzleGain);
+                sizzleGain.connect(gain);
+
+                // Fade in
+                gain.gain.setTargetAtTime(0.7, ctx.currentTime, 0.2);
+
+                drone.start(); wave.start(); waveLfo.start();
+                noise.start(); sizzle.start(); sizzleLfo.start();
+
+                this._purpleNodes = {
+                    gain, drone, wave, waveLfo, noise, bandpass, sizzle, sizzleLfo,
+                    droneGain, waveGain, noiseGain, sizzleGain, waveLfoGain, sizzleLfoGain
+                };
+            }
+
+            stopPurple() {
+                if (!this._purpleActive || !this._purpleNodes) return;
+                const n = this._purpleNodes;
+                const ctx = this.ctx;
+                n.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
+                setTimeout(() => {
+                    try {
+                        n.drone.stop(); n.wave.stop(); n.waveLfo.stop();
+                        n.noise.stop(); n.sizzle.stop(); n.sizzleLfo.stop();
+                    } catch (e) {}
+                }, 400);
+                this._purpleActive = false;
+                this._purpleNodes = null;
+            }
+
+            /**
+             * Electroblast — one-shot explosive impact sound.
+             * Deep sub-bass thump + electrical discharge sweep + noise burst.
+             */
+            playBlast() {
+                if (!this.initialized) this.init();
+                if (!this.initialized) return;
+                this._ensureResumed();
+
+                const ctx = this.ctx;
+                const t = ctx.currentTime;
+
+                // Sub-bass thump
+                const sub = ctx.createOscillator();
+                sub.type = 'sine';
+                sub.frequency.setValueAtTime(120, t);
+                sub.frequency.exponentialRampToValueAtTime(25, t + 0.5);
+                const subGain = ctx.createGain();
+                subGain.gain.setValueAtTime(0.82, t);
+                subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+                sub.connect(subGain);
+                subGain.connect(this.masterGain);
+                sub.start(t);
+                sub.stop(t + 0.7);
+
+                // Electric discharge sweep (high to low)
+                const sweep = ctx.createOscillator();
+                sweep.type = 'sawtooth';
+                sweep.frequency.setValueAtTime(4000, t);
+                sweep.frequency.exponentialRampToValueAtTime(80, t + 0.6);
+                const sweepGain = ctx.createGain();
+                sweepGain.gain.setValueAtTime(0.18, t);
+                sweepGain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+                sweep.connect(sweepGain);
+                sweepGain.connect(this.masterGain);
+                sweep.start(t);
+                sweep.stop(t + 0.6);
+
+                // Noise burst (white noise filtered)
+                const bufLen = ctx.sampleRate;
+                const noiseBuf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+                const nd = noiseBuf.getChannelData(0);
+                for (let i = 0; i < bufLen; i++) {
+                    nd[i] = Math.random() * 2 - 1;
+                }
+                const noiseSrc = ctx.createBufferSource();
+                noiseSrc.buffer = noiseBuf;
+                const hp = ctx.createBiquadFilter();
+                hp.type = 'highpass';
+                hp.frequency.value = 800;
+                const noiseG = ctx.createGain();
+                noiseG.gain.setValueAtTime(0.26, t);
+                noiseG.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+                noiseSrc.connect(hp);
+                hp.connect(noiseG);
+                noiseG.connect(this.masterGain);
+                noiseSrc.start(t);
+                noiseSrc.stop(t + 0.45);
+
+                // Electrical crackle hits
+                for (let i = 0; i < 4; i++) {
+                    const crackle = ctx.createOscillator();
+                    crackle.type = 'square';
+                    const ct = t + i * 0.06;
+                    crackle.frequency.setValueAtTime(800 + Math.random() * 3000, ct);
+                    crackle.frequency.exponentialRampToValueAtTime(100, ct + 0.08);
+                    const cg = ctx.createGain();
+                    cg.gain.setValueAtTime(0.06, ct);
+                    cg.gain.exponentialRampToValueAtTime(0.001, ct + 0.1);
+                    crackle.connect(cg);
+                    cg.connect(this.masterGain);
+                    crackle.start(ct);
+                    crackle.stop(ct + 0.1);
+                }
+            }
+        }
+
+        /**
+         * GestureEngine
+         * Analyzes MediaPipe landmarks to identify hand gestures.
+         */
+        class GestureEngine {
+            constructor() {
+                this.fingerIndices = {
+                    thumb: [1, 2, 3, 4],
+                    index: [5, 6, 7, 8],
+                    middle: [9, 10, 11, 12],
+                    ring: [13, 14, 15, 16],
+                    pinky: [17, 18, 19, 20]
+                };
+            }
+
+            getDist(p1, p2) {
+                return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+            }
+
+            isFingerExtended(landmarks, finger) {
+                if (finger === 'thumb') {
+                    const tip = landmarks[4];
+                    const indexBase = landmarks[5];
+                    const handSize = this.getDist(landmarks[0], landmarks[9]);
+                    return this.getDist(tip, indexBase) > handSize * 0.6;
+                }
+                const indices = this.fingerIndices[finger];
+                const tip = landmarks[indices[3]];
+                const pip = landmarks[indices[1]];
+                return tip.y < pip.y;
+            }
+
+            detectGesture(landmarks) {
+                const states = {
+                    thumb: this.isFingerExtended(landmarks, 'thumb'),
+                    index: this.isFingerExtended(landmarks, 'index'),
+                    middle: this.isFingerExtended(landmarks, 'middle'),
+                    ring: this.isFingerExtended(landmarks, 'ring'),
+                    pinky: this.isFingerExtended(landmarks, 'pinky')
+                };
+                const extendedCount = Object.values(states).filter(v => v).length;
+
+                if (extendedCount === 5) return "OPEN PALM";
+                if (extendedCount === 0) {
+                    const wrist = landmarks[0];
+                    const middleBase = landmarks[9];
+                    return wrist.y > middleBase.y ? "FIST UP" : "FIST DOWN";
+                }
+                if (states.index && extendedCount === 1) return "POINTING";
+                if (states.index && states.middle && extendedCount === 2) return "VICTORY";
+                if (states.index && states.pinky && extendedCount === 2) return "ROCK ON";
+                if (states.thumb && states.index && states.pinky && extendedCount === 3) return "THWIP!";
+                if (states.thumb && extendedCount === 1) {
+                    const thumbTip = landmarks[4];
+                    const thumbBase = landmarks[2];
+                    return thumbTip.y < thumbBase.y ? "THUMBS UP" : "THUMBS DOWN";
+                }
+                const thumbTip = landmarks[4];
+                const indexTip = landmarks[8];
+                const dist = this.getDist(thumbTip, indexTip);
+                const handSize = this.getDist(landmarks[0], landmarks[9]);
+                if (dist < handSize * 0.2 && states.middle && states.ring && states.pinky) return "OK SIGN";
+
+                return `DETECTING... (${extendedCount})`;
+            }
+        }
+
+        /**
+         * PixelSystem: Manages pixelated hovering circles
+         */
+        class PixelSystem {
+            constructor() {
+                this.time = 0;
+                this.particles = [];
+                for (let i = 0; i < 800; i++) {
+                    this.particles.push({
+                        angle: Math.random() * Math.PI * 2,
+                        distance: Math.random(),
+                        speed: 0.003 + Math.random() * 0.006,
+                        size: 1 + Math.random() * 2,
+                        rotationSpeed: 0.05 + Math.random() * 0.1
+                    });
+                }
+                this.blasts = [];
+                this.isElectrified = false;
+            }
+
+            drawElectrifiedWaves(ctx, cw, ch) {
+                ctx.save();
+                ctx.globalAlpha = 0.6;
+                const colors = ['#000080', '#ff0044', '#ffffff', '#000000', '#ff00ff'];
+                for (let i = 0; i < 20; i++) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = colors[Math.floor(Math.random() * colors.length)];
+                    ctx.lineWidth = 1 + Math.random() * 3;
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = ctx.strokeStyle;
+
+                    let x = Math.random() * cw;
+                    let y = Math.random() * ch;
+                    ctx.moveTo(x, y);
+
+                    for (let step = 0; step < 10; step++) {
+                        x += (Math.random() - 0.5) * 150;
+                        y += (Math.random() - 0.5) * 150;
+                        ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            addBlast(x, y, colorType = 'purple') {
+                const mainColor = '#ff00ff';
+                this.blasts.push({
+                    x, y,
+                    color: mainColor,
+                    radius: 0,
+                    alpha: 0.95,
+                    maxRadius: 800
+                });
+
+                const shockColors = ['#ff00ff', '#0000ff', '#ff0044', '#ffffff', '#111111'];
+                for (let i = 0; i < 1500; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 0.8 + Math.random() * 9.5;
+                    this.particles.push({
+                        bx: x, by: y,
+                        angle: angle,
+                        distance: Math.random() * 0.05,
+                        speed: speed / 90,
+                        size: 0.3 + Math.random() * 2.2,
+                        isBlastPart: true,
+                        life: 0.25 + Math.random() * 0.4,
+                        color: shockColors[Math.floor(Math.random() * shockColors.length)]
+                    });
+                }
+            }
+
+            isBlasting() {
+                return this.blasts.length > 0;
+            }
+
+            update() {
+                this.time += 0.04;
+                // Update blasts - faster decay for shorter blast time
+                this.blasts.forEach((b, i) => {
+                    b.radius += 80;
+                    b.alpha -= 0.08;
+                    if (b.alpha <= 0) this.blasts.splice(i, 1);
+                });
+
+                // Update blast particles
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    if (p.isBlastPart) {
+                        p.distance += p.speed;
+                        p.life -= 0.025;
+                        if (p.life <= 0) this.particles.splice(i, 1);
+                    }
+                }
+            }
+
+            drawBlasts(ctx, cw, ch) {
+                ctx.save();
+                this.blasts.forEach(b => {
+                    const baseAlpha = Math.min(Math.max(b.alpha, 0), 1);
+                    const opacity = Math.min(baseAlpha * 0.15, 0.2);
+                    ctx.globalAlpha = opacity;
+
+                    // Faint purple region - reduced transparency
+                    ctx.save();
+                    ctx.globalAlpha = opacity * 0.15;
+                    const regionGrad = ctx.createRadialGradient(b.x * cw, b.y * ch, 0, b.x * cw, b.y * ch, b.radius * 1.5);
+                    regionGrad.addColorStop(0, 'rgba(255, 100, 255, 0.3)');
+                    regionGrad.addColorStop(0.4, 'rgba(200, 50, 255, 0.15)');
+                    regionGrad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = regionGrad;
+                    ctx.beginPath(); ctx.arc(b.x * cw, b.y * ch, b.radius * 1.5, 0, Math.PI * 2); ctx.fill();
+                    ctx.restore();
+
+                    // Main blast wave - reduced glow
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'screen';
+                    ctx.shadowBlur = 25;
+                    ctx.shadowColor = '#d100ff';
+                    const grad = ctx.createRadialGradient(b.x * cw, b.y * ch, 0, b.x * cw, b.y * ch, b.radius);
+                    grad.addColorStop(0, '#ffffff');
+                    grad.addColorStop(0.3, '#ff80ff');
+                    grad.addColorStop(0.7, b.color);
+                    grad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = grad;
+                    ctx.globalAlpha = 0.85;
+                    ctx.beginPath();
+                    ctx.arc(b.x * cw, b.y * ch, b.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+
+                    // Plasma lightning tendrils - reduced count
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'screen';
+                    const sparkleCount = 8;
+                    for (let p = 0; p < sparkleCount; p++) {
+                        const mainAngle = p * (Math.PI * 2 / sparkleCount) + Math.sin(this.time * 0.9 + p) * 0.3;
+                        const branches = 2;
+                        for (let branch = 0; branch < branches; branch++) {
+                            let cx = b.x * cw;
+                            let cy = b.y * ch;
+                            let angle = mainAngle + (Math.random() - 0.5) * 0.4;
+                            ctx.strokeStyle = branch % 2 === 0 ? '#ffffff' : '#e0e0ff';
+                            ctx.lineWidth = 1.2;
+                            ctx.shadowBlur = 20;
+                            ctx.shadowColor = '#ffffff';
+                            ctx.globalAlpha = 0.8;
+                            ctx.beginPath();
+                            ctx.moveTo(cx, cy);
+                            const steps = 3;
+                            for (let step = 0; step < steps; step++) {
+                                angle += (Math.random() - 0.5) * 0.35;
+                                cx += Math.cos(angle) * (b.radius * 0.08);
+                                cy += Math.sin(angle) * (b.radius * 0.08);
+                                ctx.lineTo(cx, cy);
+                            }
+                            ctx.stroke();
+                        }
+                    }
+                    ctx.restore();
+
+                    // Bright purple core glow - more transparent
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'screen';
+                    const coreGrad = ctx.createRadialGradient(b.x * cw, b.y * ch, 0, b.x * cw, b.y * ch, b.radius * 0.35);
+                    coreGrad.addColorStop(0, '#ffffff');
+                    coreGrad.addColorStop(0.3, '#ff9cff');
+                    coreGrad.addColorStop(0.7, '#ff5cff');
+                    coreGrad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = coreGrad;
+                    ctx.globalAlpha = Math.min(0.15, opacity * 0.8);
+                    ctx.beginPath();
+                    ctx.arc(b.x * cw, b.y * ch, b.radius * 0.35, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+
+                    // Smudged shock arcs - reduced count
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'screen';
+                    ctx.shadowBlur = 16;
+                    ctx.shadowColor = '#9600ff';
+                    ctx.lineWidth = 6;
+                    for (let s = 0; s < 5; s++) {
+                        const angle = s * (Math.PI * 2 / 5) + this.time * 3;
+                        const startR = b.radius * (0.4 + Math.sin(this.time * 2 + s) * 0.05);
+                        const endR = b.radius * (0.9 + Math.cos(this.time * 2.5 + s) * 0.06);
+                        ctx.strokeStyle = s % 2 === 0 ? '#8800ff' : '#5500cc';
+                        ctx.globalAlpha = 0.15;
+                        ctx.beginPath();
+                        ctx.moveTo(b.x * cw + Math.cos(angle) * startR, b.y * ch + Math.sin(angle) * startR);
+                        ctx.lineTo(b.x * cw + Math.cos(angle) * endR, b.y * ch + Math.sin(angle) * endR);
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+
+                    // Smudged lighting effect - reduced transparency
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'screen';
+                    const smudgeGrad = ctx.createRadialGradient(b.x * cw, b.y * ch, 0, b.x * cw, b.y * ch, b.radius * 1.5);
+                    smudgeGrad.addColorStop(0, 'rgba(255, 150, 255, 0.12)');
+                    smudgeGrad.addColorStop(0.3, 'rgba(200, 50, 255, 0.06)');
+                    smudgeGrad.addColorStop(0.6, 'rgba(150, 0, 200, 0.03)');
+                    smudgeGrad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = smudgeGrad;
+                    ctx.globalAlpha = b.alpha * 0.5;
+                    ctx.filter = 'blur(20px)';
+                    ctx.beginPath();
+                    ctx.arc(b.x * cw, b.y * ch, b.radius * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+
+                    // Scattered tiny white and purple particles - tinier and more opaque
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'screen';
+                    const scatterCount = 50;
+                    for (let s = 0; s < scatterCount; s++) {
+                        const scatterAngle = (Math.random() * Math.PI * 2) + (this.time * 2);
+                        const scatterDist = (Math.random() * 0.6 + 0.2) * b.radius;
+                        const sx = b.x * cw + Math.cos(scatterAngle) * scatterDist;
+                        const sy = b.y * ch + Math.sin(scatterAngle) * scatterDist;
+                        const isWhite = Math.random() > 0.35;
+                        ctx.fillStyle = isWhite ? '#ffffff' : '#ffaaff';
+                        ctx.globalAlpha = (Math.random() * 0.3 + 0.7) * b.alpha;
+                        ctx.shadowBlur = isWhite ? 6 : 8;
+                        ctx.shadowColor = isWhite ? '#ffffff' : '#ff66ff';
+                        const pSize = Math.random() * 0.8 + 0.2;
+                        ctx.beginPath();
+                        ctx.arc(sx, sy, pSize, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    ctx.restore();
+                });
+                ctx.restore();
+            }
+
+            drawPixelCircle(ctx, x, y, colorType = 'red', isBig = false, w, h, handRadius = 100, scale = 1) {
+                ctx.save();
+                const px = x * w;
+                const py = y * h + (Math.sin(this.time * 2) * 15 / scale); // Account for scale in hover offset
+
+                let color, glow, coreColor;
+                switch (colorType) {
+                    case 'blue':
+                        color = '#000d4d'; glow = '#3d5a8a'; coreColor = '#6d8abd'; break;
+                    case 'black':
+                        color = '#111111'; glow = '#b07cff'; coreColor = '#6f6f83'; break;
+                    case 'white':
+                        color = '#ffffff'; glow = '#e7e0ff'; coreColor = '#f8f8ff'; break;
+                    case 'purple':
+                        color = '#ff00ff'; glow = '#d200ff'; coreColor = '#ffd6ff'; break;
+                    case 'red':
+                    default:
+                        color = '#ff0044'; glow = '#ff6d85'; coreColor = '#ffccd6'; break;
+                }
+
+                // Radius reduced for a more compact, intense effect
+                const radius = isBig ? handRadius * 1.1 : handRadius * 1.045;
+
+                // 2. Inner Bloom (Intense central light)
+                const bloomGrad = ctx.createRadialGradient(px, py, 0, px, py, radius * 0.55);
+                bloomGrad.addColorStop(0, '#ffffff');
+                bloomGrad.addColorStop(0.18, color);
+                bloomGrad.addColorStop(0.45, glow);
+                bloomGrad.addColorStop(1, 'transparent');
+                ctx.fillStyle = bloomGrad;
+                ctx.beginPath();
+                ctx.arc(px, py, radius * 0.55, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.save();
+                ctx.shadowBlur = 18;
+                ctx.shadowColor = glow;
+                ctx.fillStyle = glow;
+                ctx.globalAlpha = 0.22;
+                ctx.beginPath();
+                ctx.arc(px, py, radius * 0.78, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+
+                if (colorType === 'purple' && isBig) {
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'screen';
+                    ctx.strokeStyle = '#ff9cff';
+                    ctx.lineWidth = 2;
+                    ctx.shadowBlur = 28;
+                    ctx.shadowColor = '#ff3cff';
+                    ctx.globalAlpha = 0.18;
+                    const spikeCount = 10;
+                    for (let i = 0; i < spikeCount; i++) {
+                        const startAngle = i * (Math.PI * 2 / spikeCount) + Math.sin(this.time * 1.6 + i) * 0.2;
+                        const innerRadius = radius * 0.55;
+                        const outerRadius = radius * (1.05 + Math.sin(this.time * 0.8 + i) * 0.08);
+                        const stepCount = 4;
+                        let px0 = px + Math.cos(startAngle) * innerRadius;
+                        let py0 = py + Math.sin(startAngle) * innerRadius;
+                        ctx.beginPath();
+                        ctx.moveTo(px0, py0);
+                        for (let s = 1; s <= stepCount; s++) {
+                            const stepAngle = startAngle + (Math.random() - 0.5) * 0.3;
+                            const stepRadius = innerRadius + (outerRadius - innerRadius) * (s / stepCount);
+                            const vx = px + Math.cos(stepAngle) * stepRadius;
+                            const vy = py + Math.sin(stepAngle) * stepRadius;
+                            ctx.lineTo(vx, vy);
+                        }
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+
+                    ctx.save();
+                    ctx.globalAlpha = 0.16;
+                    for (let i = 0; i < 12; i++) {
+                        const angle = i * (Math.PI * 2 / 12) + this.time * 1.2;
+                        const sparkRadius = radius * (0.65 + Math.random() * 0.2);
+                        const sx = px + Math.cos(angle) * sparkRadius;
+                        const sy = py + Math.sin(angle) * sparkRadius;
+                        ctx.fillStyle = i % 2 === 0 ? '#ffffff' : glow;
+                        ctx.beginPath();
+                        ctx.arc(sx, sy, 1.5 + Math.random() * 1.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    ctx.restore();
+                }
+
+                // Optimization: Disable shadowBlur for individual particles (extremely expensive)
+                // and use the background Aura/Bloom for the glow effect.
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 1;
+
+                // Optimization: Disable shadowBlur for individual particles (extremely expensive)
+                // and use the background Aura/Bloom for the glow effect.
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 1;
+
+                this.particles.forEach((p, i) => {
+                    if (p.isBlastPart) return; // Skip blast particles here
+                    // Vortex logic: particles move towards the center (distance decreases)
+                    p.distance -= p.speed;
+                    if (p.distance <= 0) {
+                        p.distance = 1; // Reset to the outer edge
+                        p.angle = Math.random() * Math.PI * 2; // New entry point
+                    }
+
+                    // Spiral path: angle increases as it gets closer to center
+                    const spiralFactor = (1 - p.distance) * Math.PI * 4;
+                    const angle = p.angle + spiralFactor + (this.time * p.rotationSpeed * 5);
+                    const currentDist = p.distance * radius;
+
+                    const dx = Math.cos(angle) * currentDist;
+                    const dy = Math.sin(angle) * currentDist;
+
+                    ctx.globalAlpha = p.distance * (0.2 + Math.random() * 0.8); // Fade out as they hit center
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.arc(px + dx, py + dy, p.size / 2, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    if (i % 50 === 0) {
+                        ctx.fillStyle = '#fff';
+                        ctx.globalAlpha = p.distance * 0.6;
+                        ctx.beginPath();
+                        ctx.arc(px + dx, py + dy, 0.75, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                });
+
+                // 3. Smudge Glow Lines (Soft underlying energy)
+                const lineWaveCount = 6;
+                ctx.save();
+                for (let j = 0; j < lineWaveCount; j++) {
+                    const baseAngle = j * (Math.PI * 2 / lineWaveCount) + (this.time * 4);
+                    ctx.beginPath();
+                    ctx.strokeStyle = glow;
+                    ctx.lineWidth = 3;
+                    ctx.globalAlpha = 0.1;
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = glow;
+                    for (let t = 1; t >= 0; t -= 0.15) {
+                        const r = t * radius * (0.9 + Math.sin(this.time * 10 + t * 6) * 0.1);
+                        const a = baseAngle + (1 - t) * Math.PI * 2.5;
+                        const vx = px + Math.cos(a) * r;
+                        const vy = py + Math.sin(a) * r;
+                        if (t === 1) ctx.moveTo(vx, vy);
+                        else ctx.lineTo(vx, vy);
+                    }
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                ctx.save();
+                ctx.strokeStyle = glow;
+                ctx.lineWidth = 4;
+                ctx.globalAlpha = 0.1;
+                ctx.shadowBlur = 12;
+                ctx.shadowColor = glow;
+                for (let j = 0; j < 4; j++) {
+                    const angle = j * (Math.PI * 2 / 4) + this.time * 2.2;
+                    const startR = radius * (0.65 + Math.sin(this.time + j) * 0.04);
+                    const endR = radius * (0.95 + Math.cos(this.time * 1.5 + j) * 0.05);
+                    ctx.beginPath();
+                    ctx.moveTo(px + Math.cos(angle) * startR, py + Math.sin(angle) * startR);
+                    ctx.lineTo(px + Math.cos(angle) * endR, py + Math.sin(angle) * endR);
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                // 4. Structured Vortex Particles - reduced
+                const waveCount = 10;
+                for (let j = 0; j < waveCount; j++) {
+                    const baseAngle = j * (Math.PI * 2 / waveCount) + (this.time * 4);
+                    for (let t = 1; t >= 0; t -= 0.04) {
+                        const r = t * radius * (0.9 + Math.sin(this.time * 10 + t * 6) * 0.1);
+                        const a = baseAngle + (1 - t) * Math.PI * 2.5;
+                        const vx = px + Math.cos(a) * r;
+                        const vy = py + Math.sin(a) * r;
+                        const pSize = (1 - t) * 2.5 + 0.5;
+                        ctx.globalAlpha = (1 - t) * 0.8;
+                        ctx.fillStyle = (t < 0.2 || Math.random() > 0.85) ? '#fff' : color;
+                        ctx.beginPath();
+                        ctx.arc(vx, vy, pSize / 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+                // ----------------------------
+
+                ctx.globalCompositeOperation = 'source-over'; // Reset
+                ctx.fillStyle = '#fff';
+                ctx.globalAlpha = 1;
+                const coreSize = isBig ? 8 : 4;
+                ctx.fillRect(px - coreSize / 2, py - coreSize / 2, coreSize, coreSize);
+
+                ctx.restore();
+            }
+        }
+
+        /**
+         * Main App Logic
+         */
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loader = document.getElementById('loader');
+        const gestureToast = document.getElementById('gesture-toast');
+        const uiFps = document.getElementById('val-fps');
+        const uiHands = document.getElementById('val-hands');
+        const uiGesture = document.getElementById('val-gesture');
+
+        const engine = new GestureEngine();
+        const pixels = new PixelSystem();
+        const sfx = new SFXEngine();
+
+        // Initialize audio on first user interaction (browser autoplay policy)
+        ['click', 'touchstart', 'keydown'].forEach(evt => {
+            document.addEventListener(evt, () => sfx.init(), { once: true });
+        });
+        let lastFrameTime = Date.now();
+        let currentGesture = "";
+        let gestureHoldCounter = 0;
+        let leftWasJoined = false;
+        let rightWasJoined = false;
+        let purpleFormationActive = false;
+        let purpleFormationBlastCount = 0;
+        let blueFormationBlastCount = 0;
+        let redFormationBlastCount = 0;
+
+        function drawHand(landmarks, vw, vh, scale) {
+            canvasCtx.save();
+            const w = vw;
+            const h = vh;
+            canvasCtx.lineWidth = 4 / scale; // Scale line width
+            canvasCtx.strokeStyle = 'rgba(0, 242, 255, 0.5)';
+            canvasCtx.lineCap = 'round';
+            canvasCtx.shadowBlur = 15 / scale; // Scale shadow
+            canvasCtx.shadowColor = '#00f2ff';
+            const connections = [
+                [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
+                [0, 9], [9, 10], [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16],
+                [0, 17], [17, 18], [18, 19], [19, 20], [5, 9], [9, 13], [13, 17]
+            ];
+            connections.forEach(([i, j]) => {
+                const p1 = landmarks[i]; const p2 = landmarks[j];
+                canvasCtx.beginPath(); canvasCtx.moveTo(p1.x * w, p1.y * h);
+                canvasCtx.lineTo(p2.x * w, p2.y * h); canvasCtx.stroke();
+            });
+            landmarks.forEach((p, i) => {
+                const isTip = [4, 8, 12, 16, 20].includes(i);
+                canvasCtx.fillStyle = isTip ? 'rgba(188, 0, 255, 0.6)' : 'rgba(0, 242, 255, 0.4)';
+                canvasCtx.beginPath(); canvasCtx.arc(p.x * w, p.y * h, (isTip ? 8 : 5) / scale, 0, Math.PI * 2); canvasCtx.fill();
+                canvasCtx.fillStyle = '#fff'; canvasCtx.beginPath(); canvasCtx.arc(p.x * w, p.y * h, 2 / scale, 0, Math.PI * 2); canvasCtx.fill();
+            });
+            canvasCtx.restore();
+        }
+
+        function onResults(results) {
+            const now = Date.now();
+            const fps = Math.round(1000 / (now - lastFrameTime));
+            uiFps.innerText = `${fps} FPS`;
+            lastFrameTime = now;
+            const vw = results.image.width;
+            const vh = results.image.height;
+            const cw = canvasElement.width;
+            const ch = canvasElement.height;
+
+            // Calculate 'cover' scale and offsets
+            const scale = Math.max(cw / vw, ch / vh);
+            const offsetX = (cw - vw * scale) / 2;
+            const offsetY = (ch - vh * scale) / 2;
+
+            canvasCtx.clearRect(0, 0, cw, ch);
+            canvasCtx.save();
+
+            // Apply transformation for mirrored feel and cover
+            canvasCtx.translate(offsetX, offsetY);
+            canvasCtx.scale(scale, scale);
+
+            canvasCtx.globalAlpha = 0.9;
+            canvasCtx.drawImage(results.image, 0, 0, vw, vh);
+            canvasCtx.globalAlpha = 1.0;
+
+            // Dark overlay to make effects pop
+            canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            canvasCtx.fillRect(0, 0, vw, vh);
+
+            // Pass global scale to drawing functions if needed for fixed-size elements
+            window.currentScale = scale;
+
+            let handCount = 0;
+            let detectedGesture = "NONE";
+            let leftIndexTip = null;
+            let rightIndexTip = null;
+            let leftJoined = false;
+            let rightJoined = false;
+
+            let leftGesture = "NONE";
+            let rightGesture = "NONE";
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                handCount = results.multiHandLandmarks.length;
+                results.multiHandLandmarks.forEach((landmarks, index) => {
+                    const handedness = results.multiHandedness[index];
+                    drawHand(landmarks, vw, vh, scale);
+                    const gesture = engine.detectGesture(landmarks);
+
+                    const indexTip = landmarks[8];
+                    const middleTip = landmarks[12];
+                    const handSize = engine.getDist(landmarks[0], landmarks[9]);
+                    const isJoined = engine.getDist(indexTip, middleTip) < handSize * 0.25;
+
+                    if (handedness.label === 'Left') {
+                        leftIndexTip = indexTip;
+                        leftGesture = gesture;
+                        if (leftWasJoined && gesture === "OPEN PALM" && blueFormationBlastCount < 2) {
+                            pixels.addBlast(indexTip.x, indexTip.y, 'purple');
+                            sfx.playBlast();
+                            blueFormationBlastCount += 1;
+                        }
+                        leftWasJoined = isJoined;
+                        leftJoined = isJoined;
+                    } else {
+                        rightIndexTip = indexTip;
+                        rightGesture = gesture;
+                        if (rightWasJoined && gesture === "OPEN PALM" && redFormationBlastCount < 2) {
+                            pixels.addBlast(indexTip.x, indexTip.y, 'purple');
+                            sfx.playBlast();
+                            redFormationBlastCount += 1;
+                        }
+                        rightWasJoined = isJoined;
+                        rightJoined = isJoined;
+                    }
+                });
+
+                const forefingersClosed = leftIndexTip && rightIndexTip && engine.getDist(leftIndexTip, rightIndexTip) < 0.08;
+                const purpleFormationNow = forefingersClosed || (leftIndexTip && leftJoined) || (rightIndexTip && rightJoined);
+                if (purpleFormationNow && !purpleFormationActive) {
+                    purpleFormationBlastCount = 0;
+                }
+
+                // Track blue/red formation states
+                const blueFormationNow = leftIndexTip && leftJoined;
+                const redFormationNow = rightIndexTip && rightJoined;
+                if (!blueFormationNow && blueFormationBlastCount > 0) {
+                    blueFormationBlastCount = 0;
+                }
+                if (!redFormationNow && redFormationBlastCount > 0) {
+                    redFormationBlastCount = 0;
+                }
+
+                // Check for Electrified state (Fist Up + Fist Down)
+                pixels.isElectrified = (
+                    (leftGesture === "FIST UP" && rightGesture === "FIST DOWN") ||
+                    (leftGesture === "FIST DOWN" && rightGesture === "FIST UP")
+                );
+
+                // Update global animation state
+                pixels.update();
+
+                const handRadius = (results.multiHandLandmarks[0] ?
+                    engine.getDist(results.multiHandLandmarks[0][0], results.multiHandLandmarks[0][9]) * vw : 100);
+
+                // --- Sound state tracking ---
+                let showingPurple = false;
+                let showingHover = false;
+
+                // Priority 1: Both forefingers joined
+                if (leftIndexTip && rightIndexTip && engine.getDist(leftIndexTip, rightIndexTip) < 0.08) {
+                    const midX = (leftIndexTip.x + rightIndexTip.x) / 2;
+                    const midY = (leftIndexTip.y + rightIndexTip.y) / 2;
+                    pixels.drawPixelCircle(canvasCtx, midX, midY, 'purple', true, vw, vh, handRadius, scale);
+                    showingPurple = true;
+                }
+                // Priority 2: Left hand index + middle joined
+                else if (leftIndexTip && leftJoined) {
+                    pixels.drawPixelCircle(canvasCtx, leftIndexTip.x, leftIndexTip.y, 'purple', true, vw, vh, handRadius, scale);
+                    showingPurple = true;
+                }
+                // Priority 3: Right hand index + middle joined
+                else if (rightIndexTip && rightJoined) {
+                    pixels.drawPixelCircle(canvasCtx, rightIndexTip.x, rightIndexTip.y, 'purple', true, vw, vh, handRadius, scale);
+                    showingPurple = true;
+                }
+                // Regular hover effects (Disabled while blasting or electrified)
+                else if (!pixels.isBlasting() && !pixels.isElectrified) {
+                    if (leftIndexTip) {
+                        pixels.drawPixelCircle(canvasCtx, leftIndexTip.x, leftIndexTip.y, 'blue', false, vw, vh, handRadius, scale);
+                        showingHover = true;
+                    }
+                    if (rightIndexTip) {
+                        pixels.drawPixelCircle(canvasCtx, rightIndexTip.x, rightIndexTip.y, 'red', false, vw, vh, handRadius, scale);
+                        showingHover = true;
+                    }
+                }
+
+                // --- Drive SFX based on visual state ---
+                if (showingPurple) {
+                    sfx.stopHover();
+                    sfx.startPurple();
+                } else if (showingHover) {
+                    sfx.stopPurple();
+                    sfx.startHover();
+                } else {
+                    sfx.stopPurple();
+                    sfx.stopHover();
+                }
+
+                if (!purpleFormationNow && purpleFormationActive) {
+                    purpleFormationBlastCount = 0;
+                }
+                purpleFormationActive = purpleFormationNow;
+            } else {
+                // No hands detected — stop all sounds
+                sfx.stopHover();
+                sfx.stopPurple();
+            }
+
+            if (pixels.isElectrified) {
+                pixels.drawElectrifiedWaves(canvasCtx, vw, vh);
+            }
+
+            pixels.drawBlasts(canvasCtx, vw, vh);
+            canvasCtx.restore(); // Restore the transform after all hand/effect drawing
+            uiHands.innerText = handCount;
+            uiGesture.innerText = detectedGesture;
+
+            if (detectedGesture !== "NONE" && !detectedGesture.includes("DETECTING")) {
+                if (detectedGesture === currentGesture) {
+                    gestureHoldCounter++;
+                    if (gestureHoldCounter > 10) {
+                        gestureToast.innerText = detectedGesture;
+                        gestureToast.classList.add('active');
+                    }
+                } else {
+                    currentGesture = detectedGesture;
+                    gestureHoldCounter = 0;
+                    gestureToast.classList.remove('active');
+                }
+            } else {
+                gestureToast.classList.remove('active');
+                gestureHoldCounter = 0;
+            }
+        }
+
+        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({ image: videoElement }); },
+            width: 640, height: 480
+        });
+
+        function resize() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        camera.start().then(() => {
+            loader.style.opacity = '0';
+            setTimeout(() => loader.style.display = 'none', 800);
+        }).catch(err => {
+            console.error('Camera error:', err);
+            const loaderText = document.querySelector('.loader-text');
+            const loaderCircle = document.querySelector('.loader-circle');
+            
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                loaderText.innerText = "CAMERA ACCESS DENIED";
+                loaderText.style.color = "#ff0055";
+                loaderCircle.style.borderTopColor = "#ff0055";
+                
+                // Add instructions
+                const instructions = document.createElement('div');
+                instructions.style.cssText = 'margin-top:20px;font-size:0.7rem;color:#fff;text-align:center;max-width:300px;line-height:1.5;';
+                instructions.innerHTML = 'Please allow camera access in your browser settings.<br>Look for a camera icon in the address bar.';
+                loaderText.parentNode.appendChild(instructions);
+            } else {
+                loaderText.innerText = "CAMERA ERROR: " + err.message;
+                loaderText.style.color = "red";
+            }
+        });
+    </script>
+</body>
+
+</html>
